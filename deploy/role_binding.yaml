@@ -1,0 +1,11 @@
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: kubernetes-operators-project
+subjects:
+- kind: ServiceAccount
+  name: kubernetes-operators-project
+roleRef:
+  kind: Role
+  name: kubernetes-operators-project
+  apiGroup: rbac.authorization.k8s.io
