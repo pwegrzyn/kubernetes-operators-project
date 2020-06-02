@@ -1,0 +1,7 @@
+apiVersion: h2.example.com/v1alpha1
+kind: H2Database
+metadata:
+  name: example-h2database
+spec:
+  # Add fields here
+  size: 4
