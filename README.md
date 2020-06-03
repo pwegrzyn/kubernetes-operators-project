@@ -57,10 +57,12 @@ $ kubectl delete -f deploy/crds/h2.example.com_h2databases_crd.yaml  # remove th
 
 
 ## Environment
-This project has been developed using:
-- go (1.14.2 linux/amd64)
+This project has been developed and tested on linux/amd64 using:
+- Go (1.14.2)
 - operator-sdk (0.17.0)
 - minikube (1.9.2)
+- Docker (19.03.7)
+- Kubernetes client (1.18.2)
 
 
 ## Common Issues
@@ -68,5 +70,5 @@ When you get ```Deepcopy generation fails due to "unsupported type invalid type 
 it usually means that you need to export the GO environment vars (GOROOT and GOPATH).
 
 
-
+## Notes
 *This is a project for the class SUU at AGH-UST (2020).*
