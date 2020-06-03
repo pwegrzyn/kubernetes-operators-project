@@ -15,7 +15,17 @@ type H2DatabaseSpec struct {
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
 
 	// Size is the size of the h2 deployment
+	// Imporant: having more that 2 pods in the deplyoment is probably not necessary,
+	// as currently H2 only supports running on a single node or in HA mode with
+	// a cluster of size 2
 	Size int32 `json:"size"`
+
+	// URL to which the operator should POST DB backups, leave as 'skip' string if you don't want backups
+	Backup string `json:"backup"`
+
+	// Indicate whether to try to run the DBs as a connected cluster; will only be considered when there
+	// are exactly two DB instances running (since H2 demands it); 'yes' or 'no'
+	Clustering string `json:"clustering"`
 }
 
 // H2DatabaseStatus defines the observed state of H2Database

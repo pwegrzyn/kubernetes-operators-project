@@ -31,11 +31,25 @@ spec:
         spec:
           description: H2DatabaseSpec defines the desired state of H2Database
           properties:
+            backup:
+              description: URL to which the operator should POST DB backups, leave
+                as 'skip' string if you don't want backups
+              type: string
+            clustering:
+              description: Indicate whether to try to run the DBs as a connected cluster;
+                will only be considered when there are exactly two DB instances running
+                (since H2 demands it); 'yes' or 'no'
+              type: string
             size:
-              description: Size is the size of the h2 deployment
+              description: 'Size is the size of the h2 deployment Imporant: having
+                more that 2 pods in the deplyoment is probably not necessary, as currently
+                H2 only supports running on a single node or in HA mode with a cluster
+                of size 2'
               format: int32
               type: integer
           required:
+          - backup
+          - clustering
           - size
           type: object
         status:

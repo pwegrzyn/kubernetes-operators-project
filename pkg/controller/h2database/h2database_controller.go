@@ -20,6 +20,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"k8s.io/client-go/tools/clientcmd"
+	"bytes"
+	"fmt"
+	corev1client "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/remotecommand"
+	"k8s.io/client-go/kubernetes/scheme"
 )
 
 var log = logf.Log.WithName("controller_h2database")
@@ -184,6 +191,58 @@ func (r *ReconcileH2Database) Reconcile(request reconcile.Request) (reconcile.Re
 		}
 	}
 
+	// Backup the H2 data to a remote location
+	dataBackup := instance.Spec.Backup
+	if dataBackup != "skip" && len(podList.Items) > 0 {
+		// Actually execute the backup inside one of the pods
+		backupLocation := "/tmp/h2_backup.zip"
+		h2DataLocation := "/opt/h2-data"
+		cmdToExec := fmt.Sprintf("apk add curl zip && zip -r %s %s && curl --data \"@%s\" %s", backupLocation, h2DataLocation, backupLocation, dataBackup)
+		_, _, cmdErr := ExecuteRemoteCommand(&podList.Items[0], cmdToExec)
+		if cmdErr != nil {
+			reqLogger.Error(cmdErr, "There may have been an issue with creating the backup...")
+		}
+		// Skip later checks since this is only a one-time backup feature
+		instance.Spec.Backup = "skip"
+		err := r.client.Status().Update(context.TODO(), instance)
+		if err != nil {
+			reqLogger.Error(err, "Failed to update H2Database spec.")
+			return reconcile.Result{}, err
+		}
+	} else if dataBackup == "skip" && len(podList.Items) > 0 {
+		reqLogger.Info("Skipping backup.")
+	}
+
+	// Use H2's CreateCluster script to make a H2 cluster if the there exactly 2 DB instances
+	cluseringMode := instance.Spec.Clustering
+	if cluseringMode == "yes" && len(podList.Items) > 0 && size == 2 {
+		pod1IP := podList.Items[0].Status.PodIP
+		pod2IP := podList.Items[1].Status.PodIP
+		// I'm not sure if the ip addreses are properly handled, since both of the addreses will be
+		// hidden behind a service
+		clusterCmd := fmt.Sprintf("java -cp /opt/h2/bin/h2*.jar org.h2.tools.CreateCluster -urlSource jdbc:h2:tcp://%s:1521/~/test " +
+		"-urlTarget jdbc:h2:tcp://%s:1521/~/test -serverList %s:1521,%s:1521", pod1IP, pod2IP, pod1IP, pod2IP)
+
+		// TODO: make sure that we only need to run the CreateCluster script on one machine, and not on both...
+		_, _, cmdErr := ExecuteRemoteCommand(&podList.Items[0], clusterCmd)
+		if cmdErr != nil {
+			reqLogger.Error(cmdErr, "There may have been an issue with starting Cluster Mode..")
+		}
+		// Change the state to 'issued' to indicate that the mode has been switched to ClusterMode
+		instance.Spec.Clustering = "issued"
+		err := r.client.Status().Update(context.TODO(), instance)
+		if err != nil {
+			reqLogger.Error(err, "Failed to update H2Database spec.")
+			return reconcile.Result{}, err
+		}
+	} else if cluseringMode == "issued" && len(podList.Items) > 0 {
+		reqLogger.Info("Cluster Mode for H2 is issued.")
+	} else if cluseringMode == "no" && len(podList.Items) > 0 {
+		reqLogger.Info("Skipping Cluter Mode for H2.")
+	} else if cluseringMode == "yes" && len(podList.Items) > 0 && size != 2 {
+		reqLogger.Info("Cannot run ClusterMode if there is more or less than 2 H2 instances running!")
+	}
+
 	return reconcile.Result{}, nil
 
 	// ***********************************************************************
@@ -218,6 +277,52 @@ func (r *ReconcileH2Database) Reconcile(request reconcile.Request) (reconcile.Re
 	// // Pod already exists - don't requeue
 	// reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
 	// return reconcile.Result{}, nil
+}
+
+// ExecuteRemoteCommand executes a remote shell command on the given pod
+// returns the output from stdout and stderr
+func ExecuteRemoteCommand(pod *corev1.Pod, command string) (string, string, error) {
+	kubeCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	)
+	restCfg, err := kubeCfg.ClientConfig()
+	if err != nil {
+		return "", "", err
+	}
+	coreClient, err := corev1client.NewForConfig(restCfg)
+	if err != nil {
+		return "", "", err
+	}
+
+	buf := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	request := coreClient.RESTClient().
+		Post().
+		Namespace(pod.Namespace).
+		Resource("pods").
+		Name(pod.Name).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Command: []string{"/bin/sh", "-c", command},
+			Stdin:   false,
+			Stdout:  true,
+			Stderr:  true,
+			TTY:     true,
+		}, scheme.ParameterCodec)
+	exec, err := remotecommand.NewSPDYExecutor(restCfg, "POST", request.URL())
+	if err != nil {
+		return "", "", err
+	}
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdout: buf,
+		Stderr: errBuf,
+	})
+	if err != nil {
+		return "", "", err
+	}
+
+	return buf.String(), errBuf.String(), nil
 }
 
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
