@@ -242,6 +242,38 @@ func (r *ReconcileH2Database) Reconcile(request reconcile.Request) (reconcile.Re
 	} else if cluseringMode == "yes" && len(podList.Items) > 0 && size != 2 {
 		reqLogger.Info("Cannot run ClusterMode if there is more or less than 2 H2 instances running!")
 	}
+	
+	//Create script from database
+	script := instance.Spec.Script
+	scriptFile := instance.Spec.ScriptFile
+	
+	if(script == "yes" && len(podList.Items) > 0) {
+		pod1IP := podList.Items[0].Status.PodIP
+		scriptCmd := fmt.Sprintf("java -cp /opt/h2/bin/h2*.jar org.h2.tools.Script -url jdbc:h2:tcp://%s:1521/~/test -script %s", pod1IP, scriptFile)
+		_, _, cmdErr := ExecuteRemoteCommand(&podList.Items[0], scriptCmd)
+		if cmdErr != nil {
+			reqLogger.Error(cmdErr, "There is some problem with creating script")
+		}
+		instance.Spec.Script = "no"
+	} else if script == "no" && len(podList.Items) > 0 {
+		reqLogger.Info("Skipping creating script.")
+	}
+	
+	//Run script for database
+	runScript := instance.Spec.RunScript
+	runScriptFile := instance.Spec.RunScriptFile
+	
+	if(runScript == "yes" && len(podList.Items) > 0) {
+		pod1IP := podList.Items[0].Status.PodIP
+		runScriptCmd := fmt.Sprintf("java -cp /opt/h2/bin/h2*.jar org.h2.tools.RunScript -url jdbc:h2:tcp://%s:1521/~/test -script %s", pod1IP, runScriptFile)
+		_, _, cmdErr := ExecuteRemoteCommand(&podList.Items[0], runScriptCmd)
+		if cmdErr != nil {
+			reqLogger.Error(cmdErr, "There is some problem with running script")
+		}
+		instance.Spec.RunScript = "no"
+	} else if runScript == "no" && len(podList.Items) > 0 {
+		reqLogger.Info("Skipping running script.")
+	}
 
 	return reconcile.Result{}, nil
 

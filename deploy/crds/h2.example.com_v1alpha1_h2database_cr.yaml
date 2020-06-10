@@ -7,3 +7,7 @@ spec:
   size: 3
   backup: skip
   clustering: 'no'
+  script: 'no'
+  scriptfile: '/script/script.sql'
+  runscript: 'no'
+  runscriptfile: '/script/script.sql'

@@ -26,6 +26,18 @@ type H2DatabaseSpec struct {
 	// Indicate whether to try to run the DBs as a connected cluster; will only be considered when there
 	// are exactly two DB instances running (since H2 demands it); 'yes' or 'no'
 	Clustering string `json:"clustering"`
+	
+	// should create script file: "yes" or "no"
+	Script string `json:"script"`
+	
+	// location of script file
+	ScriptFile string `json:"scriptfile"`
+	
+	// should run script file: "yes" or "no"
+	RunScript string `json:"runscript"`
+	
+	// location of script file to run
+	RunScriptFile string `json:"runscriptfile"`
 }
 
 // H2DatabaseStatus defines the observed state of H2Database
