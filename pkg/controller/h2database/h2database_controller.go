@@ -27,6 +27,15 @@ import (
 	corev1client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/kubernetes/scheme"
+
+	"bufio"
+	"io"
+	"k8s.io/client-go/rest"
+)
+
+var (
+	kubeClient      *corev1client.Clientset
+	inClusterConfig *rest.Config
 )
 
 var log = logf.Log.WithName("controller_h2database")
@@ -99,6 +108,7 @@ type ReconcileH2Database struct {
 // Ensure that the Deployment size is the same as specified by the H2 CR spec
 func (r *ReconcileH2Database) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
+	
 	reqLogger.Info("Reconciling H2Database")
 
 	// Fetch the H2Database instance
@@ -197,11 +207,11 @@ func (r *ReconcileH2Database) Reconcile(request reconcile.Request) (reconcile.Re
 		// Actually execute the backup inside one of the pods
 		backupLocation := "/tmp/h2_backup.zip"
 		h2DataLocation := "/opt/h2-data"
-		cmdToExec := fmt.Sprintf("apk add curl zip && zip -r %s %s && curl --data \"@%s\" %s", backupLocation, h2DataLocation, backupLocation, dataBackup)
-		_, _, cmdErr := ExecuteRemoteCommand(&podList.Items[0], cmdToExec)
-		if cmdErr != nil {
-			reqLogger.Error(cmdErr, "There may have been an issue with creating the backup...")
-		}
+
+		reqLogger.Info("Executing POST backup to the specified URL...")
+		cmdToExec := fmt.Sprintf("apk add curl zip && zip -r %s %s && curl -X POST --data-binary \"@%s\" %s", backupLocation, h2DataLocation, backupLocation, dataBackup)
+		ExecuteRemoteCommand(&podList.Items[0], cmdToExec)
+
 		// Skip later checks since this is only a one-time backup feature
 		instance.Spec.Backup = "skip"
 		err := r.client.Status().Update(context.TODO(), instance)
@@ -218,16 +228,16 @@ func (r *ReconcileH2Database) Reconcile(request reconcile.Request) (reconcile.Re
 	if cluseringMode == "yes" && len(podList.Items) > 0 && size == 2 {
 		pod1IP := podList.Items[0].Status.PodIP
 		pod2IP := podList.Items[1].Status.PodIP
+
+		reqLogger.Info("Attempting to run in HA mode...")
 		// I'm not sure if the ip addreses are properly handled, since both of the addreses will be
 		// hidden behind a service
 		clusterCmd := fmt.Sprintf("java -cp /opt/h2/bin/h2*.jar org.h2.tools.CreateCluster -urlSource jdbc:h2:tcp://%s:1521/~/test " +
 		"-urlTarget jdbc:h2:tcp://%s:1521/~/test -serverList %s:1521,%s:1521", pod1IP, pod2IP, pod1IP, pod2IP)
 
 		// TODO: make sure that we only need to run the CreateCluster script on one machine, and not on both...
-		_, _, cmdErr := ExecuteRemoteCommand(&podList.Items[0], clusterCmd)
-		if cmdErr != nil {
-			reqLogger.Error(cmdErr, "There may have been an issue with starting Cluster Mode..")
-		}
+		ExecuteRemoteCommand(&podList.Items[0], clusterCmd)
+
 		// Change the state to 'issued' to indicate that the mode has been switched to ClusterMode
 		instance.Spec.Clustering = "issued"
 		err := r.client.Status().Update(context.TODO(), instance)
@@ -281,6 +291,9 @@ func (r *ReconcileH2Database) Reconcile(request reconcile.Request) (reconcile.Re
 
 // ExecuteRemoteCommand executes a remote shell command on the given pod
 // returns the output from stdout and stderr
+
+// TODO: investigate https://github.com/operator-framework/operator-sdk/issues/1021 -
+// sometimes the execution will fail on wait.go:88
 func ExecuteRemoteCommand(pod *corev1.Pod, command string) (string, string, error) {
 	kubeCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
@@ -323,6 +336,53 @@ func ExecuteRemoteCommand(pod *corev1.Pod, command string) (string, string, erro
 	}
 
 	return buf.String(), errBuf.String(), nil
+}
+
+// Alternative implementaion to the above
+func execCommand(namespace, podName string, stdinReader io.Reader, container *corev1.Container, command ...string) (string, error) {
+
+	execReq := kubeClient.CoreV1().RESTClient().Post()
+	execReq = execReq.Resource("pods").Name(podName).Namespace(namespace).SubResource("exec")
+
+	execReq.VersionedParams(&corev1.PodExecOptions{
+		Container: container.Name,
+		Command:   command,
+		Stdout:    true,
+		Stderr:    true,
+		Stdin:     stdinReader != nil,
+	}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(inClusterConfig, "POST", execReq.URL())
+
+	if err != nil {
+		fmt.Println("Creating remote command executor failed: %v", err)
+		return "", err
+	}
+
+	stdOut := bytes.Buffer{}
+	stdErr := bytes.Buffer{}
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdout: bufio.NewWriter(&stdOut),
+		Stderr: bufio.NewWriter(&stdErr),
+		Stdin:  stdinReader,
+		Tty:    false,
+	})
+
+	fmt.Println("Command stderr: %s", stdErr.String())
+	fmt.Println("Command stdout: %s", stdOut.String())
+
+	if err != nil {
+		fmt.Println("Executing command failed with: %v", err)
+		return "", err
+	}
+
+	fmt.Println("Command succeeded.")
+	if stdErr.Len() > 0 {
+		return "", fmt.Errorf("stderr: %v", stdErr.String())
+	}
+
+	return stdOut.String(), nil
+
 }
 
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
