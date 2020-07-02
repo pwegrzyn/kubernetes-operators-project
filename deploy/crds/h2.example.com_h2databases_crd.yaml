@@ -35,6 +35,10 @@ spec:
               description: URL to which the operator should POST DB backups, leave
                 as 'skip' string if you don't want backups
               type: string
+            cacheSize:
+              description: Desired Cache Size of H2. For more info please visit https://www.h2database.com/html/features.html#cache_settings
+              format: int32
+              type: integer
             clustering:
               description: Indicate whether to try to run the DBs as a connected cluster;
                 will only be considered when there are exactly two DB instances running
@@ -49,6 +53,7 @@ spec:
               type: integer
           required:
           - backup
+          - cacheSize
           - clustering
           - size
           type: object

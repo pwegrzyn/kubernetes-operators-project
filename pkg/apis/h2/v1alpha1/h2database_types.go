@@ -26,6 +26,11 @@ type H2DatabaseSpec struct {
 	// Indicate whether to try to run the DBs as a connected cluster; will only be considered when there
 	// are exactly two DB instances running (since H2 demands it); 'yes' or 'no'
 	Clustering string `json:"clustering"`
+
+	// Desired Cache Size of H2.
+	// For more info please visit https://www.h2database.com/html/features.html#cache_settings
+	// TODO: implement handler
+	CachSize int32 `json:"cacheSize"`
 }
 
 // H2DatabaseStatus defines the observed state of H2Database
