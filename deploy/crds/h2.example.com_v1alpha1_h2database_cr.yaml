@@ -4,6 +4,6 @@ metadata:
   name: example-h2database
 spec:
   # Add fields here
-  size: 3
+  size: 2
   backup: skip
   clustering: 'no'

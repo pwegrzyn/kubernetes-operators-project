@@ -3,9 +3,7 @@ package h2database
 import (
 	"context"
 	"reflect"
-
 	h2v1alpha1 "github.com/pwegrzyn/kubernetes-operators-project/pkg/apis/h2/v1alpha1"
-
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -20,17 +18,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
 	"k8s.io/client-go/tools/clientcmd"
 	"bytes"
 	"fmt"
 	corev1client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/kubernetes/scheme"
-
 	"bufio"
 	"io"
 	"k8s.io/client-go/rest"
+	"github.com/google/uuid"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 var (
@@ -385,6 +383,42 @@ func execCommand(namespace, podName string, stdinReader io.Reader, container *co
 
 }
 
+// Function to create a PVC. Usage:
+// Client().CoreV1().PersistentVolumeClaims(namespace).Create(createOpts)
+// NOTE: To successfully create this PVC you need a valid hostPath PV with an
+// appropriate size.
+func preparePeristentVolumeClaimFilesystem(h *h2v1alpha1.H2Database) *corev1.PersistentVolumeClaim {
+
+	fs := corev1.PersistentVolumeFilesystem
+	volume, _ := uuid.NewRandom()
+
+    createOpts := &corev1.PersistentVolumeClaim{
+            ObjectMeta: metav1.ObjectMeta{
+                    Name:      volume.String(),
+                    Namespace: h.Namespace,
+                    UID:       types.UID(volume.String()),
+            },
+            Spec: corev1.PersistentVolumeClaimSpec{
+                    AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+                    Resources: corev1.ResourceRequirements{
+                            Requests: corev1.ResourceList{
+								corev1.ResourceName(corev1.ResourceStorage): resource.MustParse("5Gi"),
+                            },
+                    },
+                    VolumeName: volume.String(),
+                    VolumeMode: &fs,
+            },
+            Status: corev1.PersistentVolumeClaimStatus{
+                    Phase:       corev1.ClaimBound,
+                    AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+                    Capacity: corev1.ResourceList{
+						corev1.ResourceName(corev1.ResourceStorage): resource.MustParse("5Gi"),
+                    },
+            },
+    }
+	return createOpts
+}
+
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
 func newPodForCRBusyBox(cr *h2v1alpha1.H2Database) *corev1.Pod {
 	labels := map[string]string{
@@ -435,7 +469,23 @@ func (r *ReconcileH2Database) deploymentForH2Database(h *h2v1alpha1.H2Database) 
 							ContainerPort: 1521,
 							Name:          "h2database",
 						}},
+						VolumeMounts: []corev1.VolumeMount{
+							corev1.VolumeMount{
+								Name:      "h2-testvol",
+								MountPath: "/opt/h2-data-vol", //TODO: Reassign to data path
+							},
+						},
 					}},
+					Volumes: []corev1.Volume{
+						corev1.Volume{
+							Name: "h2-testvol",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{
+									Path: "/var/k8svols",
+								},
+							},
+						},
+					},
 				},
 			},
 		},
