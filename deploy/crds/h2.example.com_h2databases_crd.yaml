@@ -36,7 +36,8 @@ spec:
                 as 'skip' string if you don't want backups
               type: string
             cacheSize:
-              description: Desired Cache Size of H2. For more info please visit https://www.h2database.com/html/features.html#cache_settings
+              description: 'Desired Cache Size of H2. For more info please visit https://www.h2database.com/html/features.html#cache_settings
+                TODO: implement handler'
               format: int32
               type: integer
             clustering:
